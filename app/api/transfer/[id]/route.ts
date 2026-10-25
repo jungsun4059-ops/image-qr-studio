@@ -1,3 +1,4 @@
+import {allowedOrigin, corsResponse, preflight} from '../../../../lib/qr-cors';
 import {env} from 'cloudflare:workers';
 type Context={params:Promise<{id:string}>};
 const fail=(error:string,status=400)=>Response.json({error},{status,headers:{'Cache-Control':'no-store'}});
@@ -13,7 +14,7 @@ async function session(request:Request,context:Context){
  if(data.expires<Date.now())return {error:fail('전송 시간이 끝났습니다. 노트북에서 새 QR을 만들어 주세요.',410)};
  return {id,data,isReceiver:token===data.receive};
 }
-export async function GET(request:Request,context:Context){
+async function handleGET(request:Request,context:Context){
  try{
   const s=await session(request,context);if(s.error)return s.error;
   if(!s.isReceiver)return Response.json({expires:s.data!.expires},{headers:{'Cache-Control':'no-store'}});
@@ -28,8 +29,8 @@ export async function GET(request:Request,context:Context){
   return Response.json({expires:s.data!.expires,files:result.objects.map(o=>({id:o.key.split('/').pop(),name:o.customMetadata?.name||'사진',size:o.size,uploaded:o.uploaded.toISOString()})).sort((a,b)=>b.uploaded.localeCompare(a.uploaded))},{headers:{'Cache-Control':'no-store'}});
  }catch(e){console.error('Transfer read failed',e);return fail('사진을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.',503);}
 }
-export async function POST(request:Request,context:Context){
- if(request.headers.get('origin')!==new URL(request.url).origin)return fail('앱에서 다시 시도해 주세요.',403);
+async function handlePOST(request:Request,context:Context){
+ if(!allowedOrigin(request))return fail('앱에서 다시 시도해 주세요.',403);
  try{
   const s=await session(request,context);if(s.error)return s.error;
   const reader=request.body?.getReader();if(!reader)return fail('사진을 선택해 주세요.');
@@ -46,3 +47,8 @@ export async function POST(request:Request,context:Context){
   return Response.json({id,name},{status:201,headers:{'Cache-Control':'no-store'}});
  }catch(e){console.error('Transfer upload failed',e);return fail('사진을 보내지 못했습니다. 다시 시도해 주세요.',503);}
 }
+
+export async function GET(request:Request,context:Context){return corsResponse(request,await handleGET(request,context));}
+
+export async function POST(request:Request,context:Context){return corsResponse(request,await handlePOST(request,context));}
+export const OPTIONS = preflight;

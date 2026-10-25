@@ -1,7 +1,8 @@
+import {allowedOrigin, corsResponse, preflight} from '../../../lib/qr-cors';
 import { env } from 'cloudflare:workers';
-export async function POST(request:Request){
+async function handlePOST(request:Request){
  try{
- const origin=request.headers.get('origin');if(origin&&origin!==new URL(request.url).origin)return Response.json({error:'올바른 앱에서 다시 시도해 주세요.'},{status:403});
+ const origin=request.headers.get('origin');if(origin&&!allowedOrigin(request))return Response.json({error:'올바른 앱에서 다시 시도해 주세요.'},{status:403});
  const type=request.headers.get('content-type')||'';if(!['image/jpeg','image/png','image/webp','image/gif'].includes(type))return Response.json({error:'지원하지 않는 이미지 형식입니다.'},{status:400});
  if(Number(request.headers.get('content-length'))>10485760)return Response.json({error:'10MB 이하만 업로드할 수 있습니다.'},{status:413});
  const reader=request.body?.getReader();if(!reader)return Response.json({error:'이미지를 선택해 주세요.'},{status:400});let size=0;const chunks:Uint8Array[]=[];while(true){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>10485760){await reader.cancel();return Response.json({error:'10MB 이하만 업로드할 수 있습니다.'},{status:413});}chunks.push(value);}const bytes=new Uint8Array(size);let at=0;for(const c of chunks){bytes.set(c,at);at+=c.length;}
@@ -10,3 +11,6 @@ export async function POST(request:Request){
  if(!env.BUCKET)throw Error('Storage unavailable');const id=crypto.randomUUID();await env.BUCKET.put('images/'+id,bytes,{httpMetadata:{contentType:type}});return Response.json({path:'/i/'+id},{status:201});
  }catch(e){console.error('Image upload failed',e);return Response.json({error:'이미지를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.'},{status:503});}
 }
+
+export async function POST(request:Request){return corsResponse(request,await handlePOST(request));}
+export const OPTIONS = preflight;
